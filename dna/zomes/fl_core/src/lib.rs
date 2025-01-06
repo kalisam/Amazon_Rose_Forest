@@ -1,4 +1,4 @@
-// dna/zomes/fl_core/src/lib.rs woops TODO: FIX file and directory names
+// dna/zomes/fl_core/src/lib.rs wooo!
 use hdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Sha256, Digest};
