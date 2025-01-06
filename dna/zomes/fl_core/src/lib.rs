@@ -1,7 +1,7 @@
 // dna/zomes/fl_core/src/lib.rs wooo!
 use hdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 #[hdk_entry_helper]
 #[derive(Clone)]
