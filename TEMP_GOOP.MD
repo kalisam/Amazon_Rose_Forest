@@ -3424,3 +3424,218 @@ Automated anomaly detection using collected metrics?
 
 Dynamic shard balancing strategies?
 2.0 Flash Experimental. Might not work as expected.
+
+Your suggestions are excellent, especially regarding sophisticated sharding techniques and error handling. Let me propose an implementation that incorporates these refinements.
+
+
+
+```mermaid
+flowchart TB
+    subgraph "Shard Management"
+        SM[Shard Manager] --> |Monitor| SL[Shard Load]
+        SL --> |Trigger| SS[Split Strategy]
+        SL --> |Trigger| SM2[Merge Strategy]
+        
+        SS --> |Execute| SP[Split Process]
+        SM2 --> |Execute| MP[Merge Process]
+        
+        subgraph "Split Process"
+            SP --> HC[Hilbert Curve]
+            HC --> DS[Distribute Shards]
+            DS --> VM[Validate Migration]
+        end
+        
+        subgraph "Error Handling"
+            CB[Circuit Breaker]
+            RL[Retry Logic]
+            EL[Error Logger]
+        end
+    end
+    
+    subgraph "Shard Operations"
+        SO[Shard Operation] --> |Check| CB
+        CB --> |Allow| RL
+        RL --> |Execute| Op[Operation]
+        Op --> |Log| EL
+        Op --> |Success/Failure| CB
+    end
+
+```
+
+```rust
+// Advanced sharding implementation with Hilbert curve-based partitioning
+struct ShardManager {
+    config: ShardConfig,
+    circuit_breaker: CircuitBreaker,
+    metrics: Arc<ShardMetrics>,
+}
+
+impl ShardManager {
+    async fn handle_shard_split(&mut self, shard: Shard) -> Result<(), ShardError> {
+        // Use Hilbert curve for space-filling partition
+        let hilbert = HilbertCurve::new(self.config.dimensions);
+        
+        // Calculate split points based on vector distribution
+        let split_points = self.calculate_split_points(&shard, &hilbert)?;
+        
+        // Prepare migration plan
+        let migration_plan = self.prepare_migration(split_points, &shard).await?;
+        
+        // Execute migration with circuit breaker pattern
+        self.execute_migration(migration_plan).await
+    }
+    
+    async fn execute_migration(&self, plan: MigrationPlan) -> Result<(), ShardError> {
+        let mut stream = StreamingMigration::new(plan);
+        
+        while let Some(batch) = stream.next_batch().await? {
+            if !self.circuit_breaker.allow_operation()? {
+                return Err(ShardError::CircuitBreakerOpen);
+            }
+            
+            match self.transfer_batch(batch).await {
+                Ok(_) => {
+                    self.circuit_breaker.record_success();
+                    continue;
+                }
+                Err(e) => {
+                    self.circuit_breaker.record_failure();
+                    if self.should_retry(&e) {
+                        stream.retry_batch().await?;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+}
+
+// Improved circuit breaker implementation
+#[derive(Debug)]
+struct CircuitBreaker {
+    state: Arc<RwLock<CircuitState>>,
+    config: CircuitBreakerConfig,
+    metrics: Arc<Metrics>,
+}
+
+impl CircuitBreaker {
+    async fn allow_operation(&self) -> Result<bool, CircuitError> {
+        let state = self.state.read().await;
+        match *state {
+            CircuitState::Closed => Ok(true),
+            CircuitState::Open { since } => {
+                if since.elapsed() > self.config.reset_timeout {
+                    drop(state);
+                    self.half_open().await?;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            CircuitState::HalfOpen { attempts } => {
+                Ok(attempts < self.config.max_half_open_attempts)
+            }
+        }
+    }
+    
+    async fn record_result(&self, success: bool) {
+        let mut state = self.state.write().await;
+        match *state {
+            CircuitState::Closed => {
+                if !success {
+                    self.metrics.increment_failure();
+                    if self.should_open() {
+                        *state = CircuitState::Open {
+                            since: Instant::now(),
+                        };
+                    }
+                }
+            }
+            CircuitState::HalfOpen { ref mut attempts } => {
+                if success {
+                    *attempts += 1;
+                    if *attempts >= self.config.success_threshold {
+                        *state = CircuitState::Closed;
+                    }
+                } else {
+                    *state = CircuitState::Open {
+                        since: Instant::now(),
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// Advanced retry logic with decorrelated jitter
+struct RetryStrategy {
+    base: Duration,
+    cap: Duration,
+    attempts: u32,
+    rng: ThreadRng,
+}
+
+impl RetryStrategy {
+    fn next_delay(&mut self) -> Duration {
+        let temp = min(self.cap, self.base * 2u32.pow(self.attempts));
+        Duration::from_millis(
+            self.rng.gen_range(self.base.as_millis() as u64..=temp.as_millis() as u64)
+        )
+    }
+}
+
+// Improved error handling with context
+#[derive(Debug, thiserror::Error)]
+enum ShardError {
+    #[error("Shard migration failed: {context}")]
+    MigrationFailed {
+        context: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    
+    #[error("Circuit breaker is open")]
+    CircuitBreakerOpen,
+    
+    #[error("Operation timed out after {duration:?}")]
+    Timeout {
+        duration: Duration,
+        operation: String,
+    },
+}
+
+// Enhanced logging with context
+struct ContextualLogger {
+    logger: Logger,
+    context: HashMap<String, String>,
+}
+
+impl ContextualLogger {
+    fn log_error(&self, error: &ShardError, attempt: u32) {
+        let mut fields = self.context.clone();
+        fields.insert("attempt".into(), attempt.to_string());
+        fields.insert("error".into(), error.to_string());
+        
+        self.logger.error("Operation failed", fields);
+    }
+}
+```
+
+Key improvements in this implementation:
+
+1. The sharding system now uses a Hilbert curve for more efficient space partitioning, which helps maintain data locality and reduces query latency.
+
+2. The circuit breaker implementation includes a half-open state and configurable thresholds, making it more resilient to transient failures.
+
+3. The retry strategy uses decorrelated jitter, which helps prevent thundering herd problems during retries.
+
+4. Error handling includes rich context and structured logging, making it easier to diagnose and debug issues.
+
+Would you like me to:
+1. Elaborate on the Hilbert curve implementation for vector partitioning?
+2. Expand the migration streaming system?
+3. Add more sophisticated metrics collection?
