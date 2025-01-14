@@ -1,5 +1,33 @@
 # Amazon_Rose_Forest
 
+├── src/
+│   ├── core/
+│   │   ├── mod.rs                 # Core module exports
+│   │   ├── vector.rs              # Vector data structures
+│   │   ├── centroid.rs            # Centroid management
+│   │   └── metrics.rs             # Performance metrics
+│   ├── sharding/
+│   │   ├── mod.rs                 # Sharding module exports
+│   │   ├── hilbert.rs             # Hilbert curve implementation
+│   │   ├── manager.rs             # Shard management
+│   │   └── migration.rs           # Migration logic
+│   ├── error/
+│   │   ├── mod.rs                 # Error handling exports
+│   │   └── types.rs               # Custom error types
+│   ├── network/
+│   │   ├── mod.rs                 # Network module exports
+│   │   ├── circuit_breaker.rs     # Circuit breaker pattern
+│   │   └── retry.rs               # Retry strategies
+│   └── lib.rs                     # Library root
+├── tests/
+│   ├── integration/               # Integration tests
+│   └── unit/                      # Unit tests
+└── examples/                      # Usage examples
+
+
+
+
+
 https://www.sciencedaily.com/releases/2024/08/240814170129.htm
 
 https://chatgpt.com/share/27a2c405-1554-44d0-be52-ae19aa5de942
