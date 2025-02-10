@@ -1,7 +1,14 @@
-//The vector dht sharding management mass compilation of code
-// NEEDS SEPERATION INTO into simpler COMPONENTS
-//this is srsly just scratchpad of all code generated so far, likely lots of very redundant repeated code
-//latest snippets just sort/find lolol
+mod entry_types;
+mod metrics;
+mod sharding;
+
+pub use entry_types::*;
+pub use metrics::*;
+pub use sharding::*;
+
+// Re-export main components
+pub use self::sharding::ShardManager;
+pub use self::metrics::ShardMetrics;
 // Define Holochain entry types
 #[hdk_entry(id = "vector")]
 #[derive(Clone)]
