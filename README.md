@@ -1,26 +1,43 @@
-# Amazon_Rose_Forest
+# Amazon Rose Forest
 
+## Vision
+Building a Free Open Source Singularity (FOSS) through decentralized AI and collaborative knowledge sharing.
 
-https://www.sciencedaily.com/releases/2024/08/240814170129.htm
+## Core Components
 
-https://chatgpt.com/share/27a2c405-1554-44d0-be52-ae19aa5de942
+1. Decentralized Vector Database
+- Holochain-based distributed storage
+- Efficient vector embedding management
+- Hierarchical sharding with Hilbert curves
+- Fault-tolerant architecture
 
-Vision: Free Open Source Singularity (FOSS)
+2. Federated Learning System
+- Collaborative model training
+- Privacy-preserving knowledge sharing
+- Adaptive synchronization protocols
+- Real-time metrics collection
 
-Goal: Harness AI and decentralized technologies to create a utopian future with infinite resources and knowledge for all.
+3. Universal Knowledge Management
+- Standardized knowledge representation
+- Cross-model compatibility
+- Historical knowledge integration
+- Efficient transfer protocols
 
-Key Components:
+## Key Features
 
-1. AI on Holochain: Develop decentralized AI applications using Holochain's distributed architecture.
-2. Decentralized Data: Ensure data sovereignty, security, and scalability using Holochain's DHT and flexible data structures.
-3. Collective Capacity: Foster a community-driven approach, sharing knowledge and building upon each other's understanding.
-4. Ethical Considerations: Proactively address ethical implications, ensuring responsible innovation and equitable benefits.
+- Agent-centric architecture using Holochain
+- Distributed Hash Table (DHT) with smart sharding
+- Circuit breaker pattern for fault tolerance
+- Exponential backoff with jitter for reliability
+- Comprehensive metrics collection
 
-Next Steps:
+## Getting Started
 
-1. Assemble a team of experts and enthusiasts to contribute to the FOSS project.
-2. Develop a roadmap for AI on Holochain, outlining key milestones and challenges.
-3. Establish a knowledge-sharing platform for the community to collaborate and build upon each other's work.
-4. Encourage hopeful realism by acknowledging potential risks and challenges, while focusing on positive solutions.
+See [PRINCIPLES.md](./docs/PRINCIPLES.md) for detailed architectural principles and design philosophy.
 
-By following this optimized roadmap, we can work together to create a brighter future for all, leveraging the power of AI, decentralized technologies, and collective capacity.
+## Project Status: Early Development
+Currently focusing on:
+- Core architecture design
+- Knowledge representation standards
+- Vector database implementation
+- Federated learning protocols
