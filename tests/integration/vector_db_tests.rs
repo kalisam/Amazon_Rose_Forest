@@ -7,11 +7,11 @@ async fn test_vector_insertion_and_retrieval() {
     let manager = setup_test_shard_manager().await;
     let test_vector = create_test_vector();
 
-    let result = manager.insert_vector(test_vector.clone()).await;
+    let result = manager.insert_vector(test_vector.clone()).await.expect("Insertion should succeed");
     assert!(result.is_ok());
 
     let retrieved = manager.get_vector(test_vector.id()).await;
-    assert_eq!(retrieved.unwrap(), test_vector);
+    assert_eq!(retrieved.expect("Vector should be present"), test_vector);
 }
 
 #[tokio::test]

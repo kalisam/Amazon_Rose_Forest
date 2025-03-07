@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use lru::LruCache;
 use serde::{Serialize, Deserialize};
 use crate::metrics::collector::MetricsCollector;
+use thiserror::Error;
 
 /// A query for vector search
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -134,6 +135,22 @@ pub struct QueryRouter {
     metrics: Arc<MetricsCollector>,
 }
 
+#[derive(Error, Debug)]
+pub enum QueryError {
+    #[error("Network error: {0}")]
+    NetworkError(#[from] std::io::Error),
+    #[error("Timeout error")]
+    TimeoutError,
+    #[error("Invalid query format")]
+    InvalidQuery,
+    #[error("Rate limit exceeded")]
+    RateLimitExceeded,
+    #[error("No healthy nodes available")]
+    NoHealthyNodes,
+    #[error("Cache error: {0}")]
+    CacheError(#[from] std::sync::PoisonError<std::sync::RwLockWriteGuard<'static, LruCache<u64, CachedResult>>>),
+}
+
 impl QueryRouter {
     /// Create a new query router with the given configuration
     pub fn new(config: QueryRouterConfig, metrics: Arc<MetricsCollector>) -> Self {
@@ -146,7 +163,7 @@ impl QueryRouter {
     }
 
     /// Route a query to the appropriate nodes and return results
-    pub async fn route_query(&self, query: Query) -> Result<Vec<SearchResult>, String> {
+    pub async fn route_query(&self, query: Query) -> Result<Vec<SearchResult>, QueryError> {
         // Check cache first
         let query_hash = query.hash();
         if let Some(cached) = self.get_cached_result(query_hash) {
@@ -159,7 +176,7 @@ impl QueryRouter {
         let candidate_nodes = self.find_candidate_nodes(&query).await?;
 
         // Execute parallel queries
-        let results = self.execute_parallel_query(query.clone(), candidate_nodes).await?;
+        let results = self.execute_parallel_query(&query, candidate_nodes).await?;
 
         // Cache results
         self.cache_results(query_hash, results.clone());
@@ -168,11 +185,11 @@ impl QueryRouter {
     }
 
     /// Find candidate nodes for a query
-    async fn find_candidate_nodes(&self, query: &Query) -> Result<Vec<NodeId>, String> {
+    async fn find_candidate_nodes(&self, query: &Query) -> Result<Vec<NodeId>, QueryError> {
         // This would normally use LSH or other techniques to find relevant nodes
         // For now, we'll just return all healthy nodes
 
-        let node_health = self.node_health.read().map_err(|e| e.to_string())?;
+        let node_health = self.node_health.read().map_err(|e| QueryError::CacheError(e))?;
 
         let healthy_nodes: Vec<NodeId> = node_health.iter()
             .filter(|(_, health)| health.is_healthy())
@@ -180,7 +197,7 @@ impl QueryRouter {
             .collect();
 
         if healthy_nodes.is_empty() {
-            return Err("No healthy nodes available".to_string());
+            return Err(QueryError::NoHealthyNodes);
         }
 
         // Record metrics
@@ -190,7 +207,7 @@ impl QueryRouter {
     }
 
     /// Execute a query in parallel across multiple nodes
-    async fn execute_parallel_query(&self, query: Query, nodes: Vec<NodeId>) -> Result<Vec<SearchResult>, String> {
+    async fn execute_parallel_query(&self, query: &Query, nodes: Vec<NodeId>) -> Result<Vec<SearchResult>, QueryError> {
         // In a real implementation, this would send the query to multiple nodes in parallel
         // For now, we'll just simulate results
 
@@ -217,8 +234,8 @@ impl QueryRouter {
     }
 
     /// Update health metrics for a node
-    pub fn update_node_health(&self, node: NodeId, health: NodeHealth) -> Result<(), String> {
-        let mut node_health = self.node_health.write().map_err(|e| e.to_string())?;
+    pub fn update_node_health(&self, node: NodeId, health: NodeHealth) -> Result<(), QueryError> {
+        let mut node_health = self.node_health.write().map_err(|e| QueryError::CacheError(e))?;
         node_health.insert(node, health);
         Ok(())
     }
@@ -249,8 +266,8 @@ impl QueryRouter {
     }
 
     /// Clear the cache
-    pub fn clear_cache(&self) -> Result<(), String> {
-        let mut cache = self.cache.write().map_err(|e| e.to_string())?;
+    pub fn clear_cache(&self) -> Result<(), QueryError> {
+        let mut cache = self.cache.write().map_err(|e| QueryError::CacheError(e))?;
         cache.clear();
         Ok(())
     }

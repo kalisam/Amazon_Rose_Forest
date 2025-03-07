@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, SystemTime};
 use serde::{Serialize, Deserialize};
 use crate::knowledge::representation::{Knowledge, KnowledgeMetadata};
+use thiserror::Error;
 
 /// Agent identifier for CRDT operations
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -179,6 +180,16 @@ pub struct CRDTKnowledgeSet {
     pub entries: BTreeMap<String, CRDTKnowledge>,
 }
 
+const MAX_ENTRIES: usize = 10_000;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CRDTError {
+    #[error("Storage limit reached")]
+    StorageLimitReached,
+    #[error("Invalid knowledge format")]
+    InvalidKnowledge,
+}
+
 impl CRDTKnowledgeSet {
     /// Create a new empty CRDT knowledge set
     pub fn new() -> Self {
@@ -187,8 +198,10 @@ impl CRDTKnowledgeSet {
         }
     }
 
-    /// Add or update a knowledge entry
-    pub fn add(&mut self, knowledge: Knowledge, agent: AgentId) {
+    fn insert(&mut self, knowledge: Knowledge, agent: AgentId) -> Result<(), CRDTError> {
+        if self.entries.len() >= MAX_ENTRIES {
+            return Err(CRDTError::StorageLimitReached);
+        }
         let id = knowledge.id.clone();
         let entry = CRDTKnowledge::new(knowledge, agent);
 
@@ -200,6 +213,23 @@ impl CRDTKnowledgeSet {
                 self.entries.insert(id, entry);
             }
         }
+        Ok(())
+    }
+
+    fn batch_insert(&mut self, knowledge_list: Vec<Knowledge>, agent: AgentId) -> Result<(), CRDTError> {
+        if self.entries.len() + knowledge_list.len() > MAX_ENTRIES {
+            return Err(CRDTError::StorageLimitReached);
+        }
+        
+        for knowledge in knowledge_list {
+            self.insert(knowledge, agent.clone())?;
+        }
+        Ok(())
+    }
+
+    /// Add or update a knowledge entry
+    pub fn add(&mut self, knowledge: Knowledge, agent: AgentId) -> Result<(), CRDTError> {
+        self.insert(knowledge, agent)
     }
 
     /// Delete a knowledge entry
