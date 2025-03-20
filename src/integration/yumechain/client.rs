@@ -15,6 +15,9 @@ use super::schema::{
     KnowledgePackage, KnowledgeQuery, KnowledgeEvaluation, ConflictResolution,
     ApiResponse, PublishResponse, QueryResponse, EvaluationResponse
 };
+use rate_limiter::{Quota, RateLimiter};
+
+const MAX_REQUESTS_PER_MINUTE: u32 = 100;
 
 /// Errors that can occur during YumeiCHAIN API operations
 #[derive(Debug, Error)]
@@ -39,6 +42,9 @@ pub enum YumeiChainError {
 
     #[error("Retry limit exceeded: {0}")]
     RetryLimitExceeded(String),
+  
+    #[error("Client creation failed")]
+    ClientCreationFailed,
 }
 
 /// Vote type for knowledge evaluation
@@ -80,6 +86,7 @@ impl ToString for ResolutionType {
             ResolutionType::Merge => "merge".to_string(),
         }
     }
+
 }
 
 /// Configuration for the YumeiCHAIN client
@@ -102,6 +109,8 @@ pub struct YumeiChainConfig {
 
     /// Backoff strategy for retries (in milliseconds)
     pub retry_backoff_ms: u64,
+    /// Circuit breaker configuration
+    pub circuit_breaker_config: CircuitBreakerConfig,
 }
 
 impl Default for YumeiChainConfig {
@@ -112,7 +121,14 @@ impl Default for YumeiChainConfig {
             node_id: "amazon-rose-forest".to_string(),
             timeout_seconds: 30,
             max_retries: 3,
+
             retry_backoff_ms: 500,
+            circuit_breaker_config: CircuitBreakerConfig {
+                failure_threshold: 5,
+                success_threshold: 3,
+                max_half_open_attempts: 10,
+                reset_timeout: std::time::Duration::from_secs(60),
+            },
         }
     }
 }
@@ -130,29 +146,26 @@ pub struct YumeiChainClient {
 
     /// Metrics collector
     metrics: Arc<MetricsCollector>,
+
+    /// Rate limiter
+    rate_limiter: RateLimiter,
 }
 
 impl YumeiChainClient {
     /// Create a new YumeiCHAIN client with the specified configuration
-    pub fn new(config: YumeiChainConfig, metrics: Arc<MetricsCollector>) -> Self {
+    pub fn new(config: YumeiChainConfig, metrics: Arc<MetricsCollector>) -> Result<Self, YumeiChainError> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(config.timeout_seconds))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|_| YumeiChainError::ClientCreationFailed)?;
 
-        let circuit_breaker_config = CircuitBreakerConfig {
-            failure_threshold: 5,
-            success_threshold: 3,
-            max_half_open_attempts: 10,
-            reset_timeout: std::time::Duration::from_secs(60),
-        };
-
-        Self {
+        Ok(Self {
             client,
             config,
-            circuit_breaker: CircuitBreaker::new(circuit_breaker_config),
+            circuit_breaker: CircuitBreaker::new(config.circuit_breaker_config),
             metrics,
-        }
+            rate_limiter: RateLimiter::direct(Quota::per_minute(non_zero!(MAX_REQUESTS_PER_MINUTE))),
+        })
     }
 
     /// Unified response handler for API requests
@@ -162,6 +175,30 @@ impl YumeiChainClient {
         metric_name: &str,
         start_time: Instant,
     ) -> Result<T, YumeiChainError> {
+
+    /// Register this AI node with YumeiCHAIN
+    pub async fn register_node(&self, public_key: &str) -> Result<(), YumeiChainError> {
+        // Check circuit breaker
+        if !self.circuit_breaker.allow_operation()? {
+            return Err(YumeiChainError::CircuitBreakerOpen);
+        }
+
+        // Check rate limiter
+        if !self.rate_limiter.acquire() {
+            return Err(YumeiChainError::AuthenticationError("Rate limit exceeded".to_string()));
+        }
+
+        // Start metrics timer
+        let start = std::time::Instant::now();
+
+        // Make API request
+        let url = format!("{}/register", self.config.api_url);
+        let response = self.client
+            .post(&url)
+            .query(&[("node_id", &self.config.node_id), ("public_key", &public_key)])
+            .send()
+            .await;
+
         // Record metrics
         let duration = start_time.elapsed();
         self.metrics.record_histogram(&format!("{}.duration", metric_name), duration.as_millis() as f64, None);
@@ -290,6 +327,11 @@ impl YumeiChainClient {
 
     /// Publish a knowledge package to YumeiCHAIN
     pub async fn publish_knowledge(&self, mut knowledge: KnowledgePackage) -> Result<PublishResponse, YumeiChainError> {
+        // Check rate limiter
+        if !self.rate_limiter.acquire() {
+            return Err(YumeiChainError::AuthenticationError("Rate limit exceeded".to_string()));
+        }
+
         // Ensure knowledge has IDs
         knowledge.ensure_ids();
 
@@ -322,6 +364,20 @@ impl YumeiChainClient {
 
     /// Query knowledge packages from YumeiCHAIN
     pub async fn query_knowledge(&self, query: KnowledgeQuery) -> Result<QueryResponse, YumeiChainError> {
+
+        // Check circuit breaker
+        if !self.circuit_breaker.allow_operation()? {
+            return Err(YumeiChainError::CircuitBreakerOpen);
+        }
+
+        // Check rate limiter
+        if !self.rate_limiter.acquire() {
+            return Err(YumeiChainError::AuthenticationError("Rate limit exceeded".to_string()));
+        }
+
+        // Start metrics timer
+        let start = std::time::Instant::now();
+
         // Build query parameters
         let mut params = Vec::new();
         if let Some(domain) = &query.domain {
@@ -359,6 +415,22 @@ impl YumeiChainClient {
 
     /// Get a specific knowledge package by ID
     pub async fn get_knowledge(&self, knowledge_id: &str) -> Result<KnowledgePackage, YumeiChainError> {
+
+        // Check circuit breaker
+        if !self.circuit_breaker.allow_operation()? {
+            return Err(YumeiChainError::CircuitBreakerOpen);
+        }
+
+        // Check rate limiter
+        if !self.rate_limiter.acquire() {
+            return Err(YumeiChainError::AuthenticationError("Rate limit exceeded".to_string()));
+        }
+
+        // Start metrics timer
+        let start = std::time::Instant::now();
+
+        // Make API request
+
         let url = format!("{}/knowledge/{}", self.config.api_url, knowledge_id);
         let knowledge_id_str = knowledge_id.to_string();
 
@@ -378,6 +450,18 @@ impl YumeiChainClient {
 
     /// Update an existing knowledge package
     pub async fn update_knowledge(&self, knowledge_id: &str, mut knowledge: KnowledgePackage) -> Result<PublishResponse, YumeiChainError> {
+
+        // Check circuit breaker
+        if !self.circuit_breaker.allow_operation()? {
+            return Err(YumeiChainError::CircuitBreakerOpen);
+        }
+
+        // Check rate limiter
+        if !self.rate_limiter.acquire() {
+            return Err(YumeiChainError::AuthenticationError("Rate limit exceeded".to_string()));
+        }
+
+
         // Set the knowledge ID
         knowledge.knowledge_id = Some(knowledge_id.to_string());
 
@@ -410,6 +494,17 @@ impl YumeiChainClient {
 
     /// Evaluate (upvote/downvote) a knowledge package
     pub async fn evaluate_knowledge(&self, knowledge_id: &str, mut evaluation: KnowledgeEvaluation) -> Result<EvaluationResponse, YumeiChainError> {
+        // Check circuit breaker
+        if !self.circuit_breaker.allow_operation()? {
+            return Err(YumeiChainError::CircuitBreakerOpen);
+        }
+
+        // Check rate limiter
+        if !self.rate_limiter.acquire() {
+            return Err(YumeiChainError::AuthenticationError("Rate limit exceeded".to_string()));
+        }
+
+
         // Set the evaluating node if not already set
         if evaluation.evaluating_node.is_empty() {
             evaluation.evaluating_node = self.config.node_id.clone();
@@ -439,6 +534,16 @@ impl YumeiChainClient {
 
     /// Resolve a conflict between knowledge packages
     pub async fn resolve_conflict(&self, knowledge_id: &str, mut resolution: ConflictResolution) -> Result<(), YumeiChainError> {
+       // Check circuit breaker
+        if !self.circuit_breaker.allow_operation()? {
+            return Err(YumeiChainError::CircuitBreakerOpen);
+        }
+
+        // Check rate limiter
+        if !self.rate_limiter.acquire() {
+            return Err(YumeiChainError::AuthenticationError("Rate limit exceeded".to_string()));
+        }
+
         // Set the resolving node if not already set
         if resolution.resolving_node.is_empty() {
             resolution.resolving_node = self.config.node_id.clone();

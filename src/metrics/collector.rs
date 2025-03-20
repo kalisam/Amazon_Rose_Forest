@@ -2,9 +2,12 @@
 //! Provides insights into query latency, throughput, and resource utilization
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use serde::{Serialize, Deserialize};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static LOCK_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 
 /// Types of metrics that can be collected
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -153,35 +156,41 @@ impl MetricsCollector {
     }
 
     /// Increment a counter metric
-    pub fn increment_counter(&self, key: &str, value: f64) {
-        let mut counters = self.counters.lock().unwrap();
+    pub fn increment_counter(&self, key: &str, value: f64) -> Result<(), MetricsError> {
+        let mut counters = try_lock_with_backoff(&*self.counters).map_err(|_| MetricsError::LockPoisoned)?;
         let counter = counters.entry(key.to_string()).or_insert_with(Vec::new);
 
         let timestamp = self.elapsed_millis();
         counter.push(MetricValue { value, timestamp });
+
+        Ok(())
     }
 
     /// Set a gauge metric
-    pub fn set_gauge(&self, key: &str, value: f64) {
-        let mut gauges = self.gauges.lock().unwrap();
+    pub fn set_gauge(&self, key: &str, value: f64) -> Result<(), MetricsError> {
+        let mut gauges = try_lock_with_backoff(&*self.gauges).map_err(|_| MetricsError::LockPoisoned)?;
         let gauge = gauges.entry(key.to_string()).or_insert_with(Vec::new);
 
         let timestamp = self.elapsed_millis();
         gauge.push(MetricValue { value, timestamp });
+
+        Ok(())
     }
 
     /// Record a value in a histogram
-    pub fn record_histogram(&self, key: &str, value: f64, config: Option<HistogramConfig>) {
-        let mut histograms = self.histograms.lock().unwrap();
+    pub fn record_histogram(&self, key: &str, value: f64, config: Option<HistogramConfig>) -> Result<(), MetricsError> {
+        let mut histograms = try_lock_with_backoff(&*self.histograms).map_err(|_| MetricsError::LockPoisoned)?;
         let histogram = histograms.entry(key.to_string()).or_insert_with(|| {
             Histogram::new(config.unwrap_or_default())
         });
 
         histogram.record(value);
+
+        Ok(())
     }
 
     /// Record the duration of an operation
-    pub fn record_duration<F, T>(&self, key: &str, f: F) -> T
+    pub fn record_duration<F, T>(&self, key: &str, f: F) -> Result<T, MetricsError>
     where
         F: FnOnce() -> T,
     {
@@ -189,14 +198,14 @@ impl MetricsCollector {
         let result = f();
         let duration = start.elapsed();
 
-        self.record_histogram(key, duration.as_millis() as f64, None);
+        self.record_histogram(key, duration.as_millis() as f64, None)?;
 
-        result
+        Ok(result)
     }
 
     /// Get the average value of a counter
     pub fn counter_average(&self, key: &str) -> Option<f64> {
-        let counters = self.counters.lock().unwrap();
+        let counters = try_lock_with_backoff(&*self.counters).map_err(|_| MetricsError::LockPoisoned).ok()?;
         counters.get(key).map(|values| {
             if values.is_empty() {
                 0.0
@@ -208,7 +217,7 @@ impl MetricsCollector {
 
     /// Get the latest value of a gauge
     pub fn gauge_latest(&self, key: &str) -> Option<f64> {
-        let gauges = self.gauges.lock().unwrap();
+        let gauges = try_lock_with_backoff(&*self.gauges).map_err(|_| MetricsError::LockPoisoned).ok()?;
         gauges.get(key).and_then(|values| {
             values.last().map(|v| v.value)
         })
@@ -216,17 +225,17 @@ impl MetricsCollector {
 
     /// Get a histogram
     pub fn get_histogram(&self, key: &str) -> Option<Histogram> {
-        let histograms = self.histograms.lock().unwrap();
+        let histograms = try_lock_with_backoff(&*self.histograms).map_err(|_| MetricsError::LockPoisoned).ok()?;
         histograms.get(key).cloned()
     }
 
     /// Get all metrics as a serializable structure
-    pub fn get_all_metrics(&self) -> HashMap<String, serde_json::Value> {
+    pub fn get_all_metrics(&self) -> Result<HashMap<String, serde_json::Value>, MetricsError> {
         let mut result = HashMap::new();
 
         // Add counters
         {
-            let counters = self.counters.lock().unwrap();
+            let counters = try_lock_with_backoff(&*self.counters).map_err(|_| MetricsError::LockPoisoned)?;
             for (key, values) in counters.iter() {
                 if let Ok(json) = serde_json::to_value(values) {
                     result.insert(format!("counter.{}", key), json);
@@ -236,7 +245,7 @@ impl MetricsCollector {
 
         // Add gauges
         {
-            let gauges = self.gauges.lock().unwrap();
+            let gauges = try_lock_with_backoff(&*self.gauges).map_err(|_| MetricsError::LockPoisoned)?;
             for (key, values) in gauges.iter() {
                 if let Ok(json) = serde_json::to_value(values) {
                     result.insert(format!("gauge.{}", key), json);
@@ -246,7 +255,7 @@ impl MetricsCollector {
 
         // Add histograms
         {
-            let histograms = self.histograms.lock().unwrap();
+            let histograms = try_lock_with_backoff(&*self.histograms).map_err(|_| MetricsError::LockPoisoned)?;
             for (key, histogram) in histograms.iter() {
                 if let Ok(json) = serde_json::to_value(histogram) {
                     result.insert(format!("histogram.{}", key), json);
@@ -254,7 +263,7 @@ impl MetricsCollector {
             }
         }
 
-        result
+        Ok(result)
     }
 
     // Helper methods
@@ -269,4 +278,25 @@ impl Default for MetricsCollector {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn try_lock_with_backoff<T>(lock: &Mutex<T>) -> Result<MutexGuard<T>, MetricsError> {
+    let mut attempts = 0;
+    loop {
+        if let Ok(guard) = lock.try_lock() {
+            return Ok(guard);
+        }
+        attempts += 1;
+        let delay = Duration::from_millis(10 * attempts as u64);
+        std::thread::sleep(delay);
+        if attempts > 10 {
+            return Err(MetricsError::LockTimeout);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum MetricsError {
+    LockPoisoned,
+    LockTimeout,
 }
