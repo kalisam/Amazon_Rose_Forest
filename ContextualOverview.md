@@ -34,10 +34,10 @@ The codebase currently includes:
 
 ## Key Files and Their Purpose
 
-- `src/core/mod.rs`: Core system components
-- `src/federated/mod.rs`: Federated learning implementation
-- `src/knowledge/representation/mod.rs`: Knowledge encoding and processing
-- `holochain_client.py`: Python client for Holochain interaction
+- `src/core/mod.rs`: Root module for core functionalities (vector DB, DHT, config, error handling, FL core).
+- `src/federated/mod.rs`: Root module for federated learning features (model updates, metrics, synchronization).
+- `src/knowledge/representation/mod.rs`: Defines structures for knowledge representation (e.g., `Knowledge`) and processing interfaces.
+- `holochain_client.py`: Python client for federated learning tasks, interacting with Holochain for model updates.
 
 ## Improvement Opportunities
 
@@ -518,9 +518,12 @@ impl CircuitBreaker {
 //! Provides insights into query latency, throughput, and resource utilization
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use serde::{Serialize, Deserialize};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static LOCK_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 
 /// Types of metrics that can be collected
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -669,50 +672,56 @@ impl MetricsCollector {
     }
 
     /// Increment a counter metric
-    pub fn increment_counter(&self, key: &str, value: f64) {
-        let mut counters = self.counters.lock().unwrap();
+    pub fn increment_counter(&self, key: &str, value: f64) -> Result<(), MetricsError> {
+        let mut counters = try_lock_with_backoff(&*self.counters).map_err(|_| MetricsError::LockPoisoned)?;
         let counter = counters.entry(key.to_string()).or_insert_with(Vec::new);
-        
+
         let timestamp = self.elapsed_millis();
         counter.push(MetricValue { value, timestamp });
+
+        Ok(())
     }
 
     /// Set a gauge metric
-    pub fn set_gauge(&self, key: &str, value: f64) {
-        let mut gauges = self.gauges.lock().unwrap();
+    pub fn set_gauge(&self, key: &str, value: f64) -> Result<(), MetricsError> {
+        let mut gauges = try_lock_with_backoff(&*self.gauges).map_err(|_| MetricsError::LockPoisoned)?;
         let gauge = gauges.entry(key.to_string()).or_insert_with(Vec::new);
-        
+
         let timestamp = self.elapsed_millis();
         gauge.push(MetricValue { value, timestamp });
+
+        Ok(())
     }
 
     /// Record a value in a histogram
-    pub fn record_histogram(&self, key: &str, value: f64, config: Option<HistogramConfig>) {
-        let mut histograms = self.histograms.lock().unwrap();
+    pub fn record_histogram(&self, key: &str, value: f64, config: Option<HistogramConfig>) -> Result<(), MetricsError> {
+        let mut histograms = try_lock_with_backoff(&*self.histograms).map_err(|_| MetricsError::LockPoisoned)?;
         let histogram = histograms.entry(key.to_string()).or_insert_with(|| {
             Histogram::new(config.unwrap_or_default())
         });
-        
+
         histogram.record(value);
+
+        Ok(())
     }
 
     /// Record the duration of an operation
-    pub fn record_duration<F, T>(&self, key: &str, f: F) -> T
+    pub fn record_duration<F, T>(&self, key: &str, f: F) -> Result<T, MetricsError>
     where
         F: FnOnce() -> T,
     {
         let start = Instant::now();
         let result = f();
         let duration = start.elapsed();
-        
-        self.record_histogram(key, duration.as_millis() as f64, None);
-        
-        result
+
+        self.record_histogram(key, duration.as_millis() as f64, None)?;
+
+        Ok(result)
     }
 
     /// Get the average value of a counter
     pub fn counter_average(&self, key: &str) -> Option<f64> {
-        let counters = self.counters.lock().unwrap();
+        let counters = try_lock_with_backoff(&*self.counters).map_err(|_| MetricsError::LockPoisoned).ok()?;
         counters.get(key).map(|values| {
             if values.is_empty() {
                 0.0
@@ -724,7 +733,7 @@ impl MetricsCollector {
 
     /// Get the latest value of a gauge
     pub fn gauge_latest(&self, key: &str) -> Option<f64> {
-        let gauges = self.gauges.lock().unwrap();
+        let gauges = try_lock_with_backoff(&*self.gauges).map_err(|_| MetricsError::LockPoisoned).ok()?;
         gauges.get(key).and_then(|values| {
             values.last().map(|v| v.value)
         })
@@ -732,49 +741,49 @@ impl MetricsCollector {
 
     /// Get a histogram
     pub fn get_histogram(&self, key: &str) -> Option<Histogram> {
-        let histograms = self.histograms.lock().unwrap();
+        let histograms = try_lock_with_backoff(&*self.histograms).map_err(|_| MetricsError::LockPoisoned).ok()?;
         histograms.get(key).cloned()
     }
 
     /// Get all metrics as a serializable structure
-    pub fn get_all_metrics(&self) -> HashMap<String, serde_json::Value> {
+    pub fn get_all_metrics(&self) -> Result<HashMap<String, serde_json::Value>, MetricsError> {
         let mut result = HashMap::new();
-        
+
         // Add counters
         {
-            let counters = self.counters.lock().unwrap();
+            let counters = try_lock_with_backoff(&*self.counters).map_err(|_| MetricsError::LockPoisoned)?;
             for (key, values) in counters.iter() {
                 if let Ok(json) = serde_json::to_value(values) {
                     result.insert(format!("counter.{}", key), json);
                 }
             }
         }
-        
+
         // Add gauges
         {
-            let gauges = self.gauges.lock().unwrap();
+            let gauges = try_lock_with_backoff(&*self.gauges).map_err(|_| MetricsError::LockPoisoned)?;
             for (key, values) in gauges.iter() {
                 if let Ok(json) = serde_json::to_value(values) {
                     result.insert(format!("gauge.{}", key), json);
                 }
             }
         }
-        
+
         // Add histograms
         {
-            let histograms = self.histograms.lock().unwrap();
+            let histograms = try_lock_with_backoff(&*self.histograms).map_err(|_| MetricsError::LockPoisoned)?;
             for (key, histogram) in histograms.iter() {
                 if let Ok(json) = serde_json::to_value(histogram) {
                     result.insert(format!("histogram.{}", key), json);
                 }
             }
         }
-        
-        result
+
+        Ok(result)
     }
 
     // Helper methods
-    
+
     /// Get elapsed milliseconds since collector start
     fn elapsed_millis(&self) -> u64 {
         self.start_time.elapsed().as_millis() as u64
@@ -785,6 +794,27 @@ impl Default for MetricsCollector {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn try_lock_with_backoff<T>(lock: &Mutex<T>) -> Result<MutexGuard<T>, MetricsError> {
+    let mut attempts = 0;
+    loop {
+        if let Ok(guard) = lock.try_lock() {
+            return Ok(guard);
+        }
+        attempts += 1;
+        let delay = Duration::from_millis(10 * attempts as u64);
+        std::thread::sleep(delay);
+        if attempts > 10 {
+            return Err(MetricsError::LockTimeout);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum MetricsError {
+    LockPoisoned,
+    LockTimeout,
 }
 ```
 
@@ -1136,6 +1166,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, SystemTime};
 use serde::{Serialize, Deserialize};
 use crate::knowledge::representation::{Knowledge, KnowledgeMetadata};
+use thiserror::Error;
 
 /// Agent identifier for CRDT operations
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1310,6 +1341,16 @@ pub struct CRDTKnowledgeSet {
     pub entries: BTreeMap<String, CRDTKnowledge>,
 }
 
+const MAX_ENTRIES: usize = 10_000;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CRDTError {
+    #[error("Storage limit reached")]
+    StorageLimitReached,
+    #[error("Invalid knowledge format")]
+    InvalidKnowledge,
+}
+
 impl CRDTKnowledgeSet {
     /// Create a new empty CRDT knowledge set
     pub fn new() -> Self {
@@ -1318,11 +1359,13 @@ impl CRDTKnowledgeSet {
         }
     }
 
-    /// Add or update a knowledge entry
-    pub fn add(&mut self, knowledge: Knowledge, agent: AgentId) {
+    fn insert(&mut self, knowledge: Knowledge, agent: AgentId) -> Result<(), CRDTError> {
+        if self.entries.len() >= MAX_ENTRIES {
+            return Err(CRDTError::StorageLimitReached);
+        }
         let id = knowledge.id.clone();
         let entry = CRDTKnowledge::new(knowledge, agent);
-        
+
         match self.entries.get_mut(&id) {
             Some(existing) => {
                 existing.merge(&entry);
@@ -1331,6 +1374,23 @@ impl CRDTKnowledgeSet {
                 self.entries.insert(id, entry);
             }
         }
+        Ok(())
+    }
+
+    fn batch_insert(&mut self, knowledge_list: Vec<Knowledge>, agent: AgentId) -> Result<(), CRDTError> {
+        if self.entries.len() + knowledge_list.len() > MAX_ENTRIES {
+            return Err(CRDTError::StorageLimitReached);
+        }
+
+        for knowledge in knowledge_list {
+            self.insert(knowledge, agent.clone())?;
+        }
+        Ok(())
+    }
+
+    /// Add or update a knowledge entry
+    pub fn add(&mut self, knowledge: Knowledge, agent: AgentId) -> Result<(), CRDTError> {
+        self.insert(knowledge, agent)
     }
 
     /// Delete a knowledge entry
@@ -1382,11 +1442,13 @@ pub mod crdt;
 //! Implements caching and health-aware node selection
 
 use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use lru::LruCache;
 use serde::{Serialize, Deserialize};
 use crate::metrics::collector::MetricsCollector;
+use thiserror::Error;
 
 /// A query for vector search
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1514,6 +1576,22 @@ pub struct QueryRouter {
     metrics: Arc<MetricsCollector>,
 }
 
+#[derive(Error, Debug)]
+pub enum QueryError {
+    #[error("Network error: {0}")]
+    NetworkError(#[from] std::io::Error),
+    #[error("Timeout error")]
+    TimeoutError,
+    #[error("Invalid query format")]
+    InvalidQuery,
+    #[error("Rate limit exceeded")]
+    RateLimitExceeded,
+    #[error("No healthy nodes available")]
+    NoHealthyNodes,
+    #[error("Cache error: {0}")]
+    CacheError(#[from] std::sync::PoisonError<std::sync::RwLockWriteGuard<'static, LruCache<u64, CachedResult>>>),
+}
+
 impl QueryRouter {
     /// Create a new query router with the given configuration
     pub fn new(config: QueryRouterConfig, metrics: Arc<MetricsCollector>) -> Self {
@@ -1526,7 +1604,7 @@ impl QueryRouter {
     }
 
     /// Route a query to the appropriate nodes and return results
-    pub async fn route_query(&self, query: Query) -> Result<Vec<SearchResult>, String> {
+    pub async fn route_query(&self, query: Query) -> Result<Vec<SearchResult>, QueryError> {
         // Check cache first
         let query_hash = query.hash();
         if let Some(cached) = self.get_cached_result(query_hash) {
@@ -1537,9 +1615,9 @@ impl QueryRouter {
         
         // Find candidate nodes
         let candidate_nodes = self.find_candidate_nodes(&query).await?;
-        
+
         // Execute parallel queries
-        let results = self.execute_parallel_query(query.clone(), candidate_nodes).await?;
+        let results = self.execute_parallel_query(&query, candidate_nodes).await?;
         
         // Cache results
         self.cache_results(query_hash, results.clone());
@@ -1548,35 +1626,35 @@ impl QueryRouter {
     }
 
     /// Find candidate nodes for a query
-    async fn find_candidate_nodes(&self, query: &Query) -> Result<Vec<NodeId>, String> {
+    async fn find_candidate_nodes(&self, query: &Query) -> Result<Vec<NodeId>, QueryError> {
         // This would normally use LSH or other techniques to find relevant nodes
         // For now, we'll just return all healthy nodes
-        
-        let node_health = self.node_health.read().map_err(|e| e.to_string())?;
-        
+
+        let node_health = self.node_health.read().map_err(|e| QueryError::CacheError(e))?;
+
         let healthy_nodes: Vec<NodeId> = node_health.iter()
             .filter(|(_, health)| health.is_healthy())
             .map(|(id, _)| id.clone())
             .collect();
         
         if healthy_nodes.is_empty() {
-            return Err("No healthy nodes available".to_string());
+            return Err(QueryError::NoHealthyNodes);
         }
-        
+
         // Record metrics
         self.metrics.set_gauge("query.candidate_nodes", healthy_nodes.len() as f64);
-        
+
         Ok(healthy_nodes)
     }
 
     /// Execute a query in parallel across multiple nodes
-    async fn execute_parallel_query(&self, query: Query, nodes: Vec<NodeId>) -> Result<Vec<SearchResult>, String> {
+    async fn execute_parallel_query(&self, query: &Query, nodes: Vec<NodeId>) -> Result<Vec<SearchResult>, QueryError> {
         // In a real implementation, this would send the query to multiple nodes in parallel
         // For now, we'll just simulate results
-        
+
         // Record start time for latency measurement
         let start = Instant::now();
-        
+
         // Simulate query execution
         let mut results = Vec::new();
         for i in 0..5 {
@@ -1587,18 +1665,18 @@ impl QueryRouter {
                 metadata: HashMap::new(),
             });
         }
-        
+
         // Record metrics
         let duration = start.elapsed();
         self.metrics.record_histogram("query.latency", duration.as_millis() as f64, None);
         self.metrics.increment_counter("query.count", 1.0);
-        
+
         Ok(results)
     }
 
     /// Update health metrics for a node
-    pub fn update_node_health(&self, node: NodeId, health: NodeHealth) -> Result<(), String> {
-        let mut node_health = self.node_health.write().map_err(|e| e.to_string())?;
+    pub fn update_node_health(&self, node: NodeId, health: NodeHealth) -> Result<(), QueryError> {
+        let mut node_health = self.node_health.write().map_err(|e| QueryError::CacheError(e))?;
         node_health.insert(node, health);
         Ok(())
     }
@@ -1629,8 +1707,8 @@ impl QueryRouter {
     }
 
     /// Clear the cache
-    pub fn clear_cache(&self) -> Result<(), String> {
-        let mut cache = self.cache.write().map_err(|e| e.to_string())?;
+    pub fn clear_cache(&self) -> Result<(), QueryError> {
+        let mut cache = self.cache.write().map_err(|e| QueryError::CacheError(e))?;
         cache.clear();
         Ok(())
     }

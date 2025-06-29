@@ -5,8 +5,8 @@ Welcome to the Amazon Rose Forest documentation. This directory contains compreh
 ## Directory Structure
 
 - `architecture/`: System architecture documentation and diagrams
-- `api/`: API specifications and integration guides
-- `research/`: Research papers, findings, and technical notes
+- `ideas/`: Collection of ideas, proposals, and brainstorming documents.
+- `vision/`: Documents outlining the project's long-term vision and goals.
 
 ## Contributing
 

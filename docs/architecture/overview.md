@@ -9,22 +9,31 @@
 - Validation rules
 - Aggregation logic
 - DHT integration
+- Leverages the core Vector Database and Holochain DHT.
 
-2. Vector Database
-- Distributed sharding
-- Hilbert curve-based partitioning
-- Circuit breaker pattern
-- Error handling with retries
+2. Vector Database (Core Infrastructure)
+- Distributed sharding using technologies like Hilbert curves.
+- Manages vector embeddings efficiently and in a decentralized manner.
+- Includes fault tolerance patterns (e.g., circuit breaker) and robust error handling.
 
-3. Client Integration
-- Python client implementation
-- Model training
-- Update submission
-- Metrics collection
+3. Universal Knowledge Management / Knowledge Graph System (Core Infrastructure)
+- Manages and connects information across the ecosystem.
+- Focuses on standardized knowledge representation and CRDTs for consistency.
+- (This corresponds to the Knowledge Graph System within the YumeiChan concept below).
 
-## System Architecture
+4. Client Integration
+- Provides interfaces (e.g., Python client) for interacting with the core systems,
+  including model training, update submission, and metrics collection.
 
-The Amazon Rose Forest project is built on a decentralized, multi-layered architecture that integrates AI, VR/AR, and blockchain technologies to create an immersive, ethical, and scalable ecosystem.
+## Extended Vision: YumeiChan AI System & VR/AR Integration
+
+The core decentralized infrastructure is envisioned to support advanced systems. One such concept is the YumeiChan AI System, which would provide empathetic and intelligent interaction, potentially within immersive VR/AR environments.
+
+The Amazon Rose Forest project aims to build a Free Open Source Singularity (FOSS) using a decentralized, multi-layered architecture. The foundation is built on Holochain, providing a decentralized backend for core functionalities such as a vector database, federated learning, and universal knowledge management.
+
+This core infrastructure is designed to support a variety of applications and advanced AI systems. For instance, an extended vision includes the "YumeiChan AI System," which would leverage these core components for sophisticated AI interactions, potentially integrating with VR/AR interfaces for immersive experiences.
+
+The following diagram illustrates a conceptual layering, where user-facing applications (like a potential YumeiChan UI or VR/AR interfaces) would sit atop the core YumeiChan AI systems, which in turn are built upon the foundational decentralized Holochain layer.
 
 ### High-Level Architecture Diagram
 
@@ -52,8 +61,8 @@ The Amazon Rose Forest project is built on a decentralized, multi-layered archit
 ```
 
 ## Core Components
-
-### 1. YumeiChan AI System
+### 1. YumeiChan AI System (Conceptual Application Layer)
+The YumeiChan AI System would build upon the core Federated Learning and Knowledge Management capabilities.
 
 #### Emotional Intelligence Engine
 - **Purpose**: Enables empathetic understanding and response generation
@@ -80,8 +89,8 @@ The Amazon Rose Forest project is built on a decentralized, multi-layered archit
   - Cross-Domain Connections
   - Contextual Understanding
 
-#### Federated Learning System
-- **Purpose**: Enables distributed learning while preserving privacy
+#### Federated Learning System (Core Component, utilized by YumeiChan)
+- **Purpose**: Enables distributed learning while preserving privacy. This is a fundamental part of the core infrastructure.
 - **Components**:
   - Model Aggregator
   - Local Training Manager
@@ -93,7 +102,7 @@ The Amazon Rose Forest project is built on a decentralized, multi-layered archit
   - Model Version Control
   - Performance Monitoring
 
-### 2. VR/AR Interface
+### 2. VR/AR Interface (Conceptual Application Layer)
 
 #### Immersive Environment Engine
 - **Purpose**: Creates and manages virtual spaces
@@ -134,10 +143,10 @@ The Amazon Rose Forest project is built on a decentralized, multi-layered archit
   - Environmental Awareness
   - Multi-user Support
 
-### 3. Blockchain Integration
+### 3. Blockchain Integration / Holochain Backend (Core Infrastructure)
 
 #### Holochain Backend
-- **Purpose**: Provides decentralized data management
+- **Purpose**: Provides the foundational decentralized data management and P2P networking.
 - **Components**:
   - DHT Manager
   - Validation Engine
@@ -149,7 +158,7 @@ The Amazon Rose Forest project is built on a decentralized, multi-layered archit
   - Scalable Storage
   - Secure Communications
 
-#### Data Sovereignty Layer
+#### Data Sovereignty Layer (Built upon Holochain)
 - **Purpose**: Ensures user control over personal data
 - **Components**:
   - Permission Manager
