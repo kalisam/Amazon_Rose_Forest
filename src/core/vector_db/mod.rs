@@ -10,34 +10,8 @@ pub use sharding::*;
 // Re-export main components
 pub use self::sharding::ShardManager;
 pub use self::metrics::ShardMetrics;
-// Define Holochain entry types
-#[hdk_entry(id = "vector")]
-#[derive(Clone)]
-pub struct VectorEntry {
-    vector_data: Vec<u8>,  // Compressed vector data
-    metadata: VectorMetadata,
-    timestamp: Timestamp,
-}
 
-#[hdk_entry(id = "centroid")]
-#[derive(Clone)]
-// Centroid structure used to represent clusters in the DHT for hierarchical sharding
-pub struct CentroidEntry {
-    centroid: Vec<f32>,
-    level: u8,  // Hierarchy level (0 for global, 1 for local)
-    cluster_size: u32,
-    version: VersionVector,
-    responsible_agents: BTreeSet<AgentPubKey>,
-}
-
-#[hdk_entry(id = "node_metadata")]
-#[derive(Clone)]
-pub struct NodeMetadataEntry {
-    health_metrics: HealthMetrics,
-    vector_count: u32,
-    last_heartbeat: Timestamp,
-    capabilities: NodeCapabilities,
-}
+// Entry types are defined in `entry_types.rs`
 
 // Define ShardMetrics for tracking shard performance metrics such as load, latency, and failure counts for monitoring and optimization
 pub struct ShardMetrics {
