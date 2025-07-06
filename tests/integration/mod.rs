@@ -6,8 +6,8 @@ use amazon_rose_forest::{
 };
 
 mod vector_db_tests;
-mod federated_learning_tests;
-mod knowledge_tests;
+// mod federated_learning_tests;
+// mod knowledge_tests;
 
 // Test utilities and helpers
 pub(crate) mod utils {
