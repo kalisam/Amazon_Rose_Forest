@@ -1,7 +1,7 @@
 //! Knowledge representation and management
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Knowledge {
     pub id: String,
     pub content: Vec<u8>,
@@ -9,7 +9,7 @@ pub struct Knowledge {
     pub vectors: Vec<f32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeMetadata {
     pub timestamp: u64,
     pub source: String,

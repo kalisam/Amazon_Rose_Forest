@@ -1,11 +1,10 @@
 //! DHT management and sharding implementation
 use hdk::prelude::*;
 
-mod sharding;
 mod routing;
 mod migration;
 
-pub use sharding::ShardManager;
+pub use crate::core::sharding::ShardManager;
 pub use routing::QueryRouter;
 pub use migration::MigrationManager;
 

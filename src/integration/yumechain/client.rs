@@ -175,6 +175,27 @@ impl YumeiChainClient {
         metric_name: &str,
         start_time: Instant,
     ) -> Result<T, YumeiChainError> {
+        let duration = start_time.elapsed();
+        self.metrics
+            .record_histogram(&format!("{}.duration", metric_name), duration.as_millis() as f64, None);
+
+        let response = response_result.map_err(YumeiChainError::NetworkError)?;
+
+        if !response.status().is_success() {
+            let message = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            self.metrics
+                .increment_counter(&format!("{}.error", metric_name), 1.0);
+            return Err(YumeiChainError::ApiError { status: response.status(), message });
+        }
+
+        self.metrics
+            .increment_counter(&format!("{}.success", metric_name), 1.0);
+        let data = response.json::<T>().await.map_err(YumeiChainError::NetworkError)?;
+        Ok(data)
+    }
 
     /// Register this AI node with YumeiCHAIN
     pub async fn register_node(&self, public_key: &str) -> Result<(), YumeiChainError> {

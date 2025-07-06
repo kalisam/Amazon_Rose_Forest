@@ -29,10 +29,15 @@ impl Query {
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
-        self.vector.hash(&mut hasher);
+        for v in &self.vector {
+            v.to_bits().hash(&mut hasher);
+        }
         self.limit.hash(&mut hasher);
-        (self.threshold * 1000.0) as u32.hash(&mut hasher);
-        self.filters.hash(&mut hasher);
+        ((self.threshold * 1000.0) as u32).hash(&mut hasher);
+        for (k, v) in &self.filters {
+            k.hash(&mut hasher);
+            v.hash(&mut hasher);
+        }
 
         hasher.finish()
     }
@@ -148,14 +153,15 @@ pub enum QueryError {
     #[error("No healthy nodes available")]
     NoHealthyNodes,
     #[error("Cache error: {0}")]
-    CacheError(#[from] std::sync::PoisonError<std::sync::RwLockWriteGuard<'static, LruCache<u64, CachedResult>>>),
+    CacheError(String),
 }
 
 impl QueryRouter {
     /// Create a new query router with the given configuration
     pub fn new(config: QueryRouterConfig, metrics: Arc<MetricsCollector>) -> Self {
+        use std::num::NonZeroUsize;
         Self {
-            cache: Arc::new(RwLock::new(LruCache::new(config.cache_size))),
+            cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(config.cache_size).unwrap_or(NonZeroUsize::new(1).unwrap())))),
             node_health: Arc::new(RwLock::new(HashMap::new())),
             metrics,
             config,
@@ -189,7 +195,10 @@ impl QueryRouter {
         // This would normally use LSH or other techniques to find relevant nodes
         // For now, we'll just return all healthy nodes
 
-        let node_health = self.node_health.read().map_err(|e| QueryError::CacheError(e))?;
+        let node_health = self
+            .node_health
+            .read()
+            .map_err(|e| QueryError::CacheError(e.to_string()))?;
 
         let healthy_nodes: Vec<NodeId> = node_health.iter()
             .filter(|(_, health)| health.is_healthy())
@@ -235,7 +244,10 @@ impl QueryRouter {
 
     /// Update health metrics for a node
     pub fn update_node_health(&self, node: NodeId, health: NodeHealth) -> Result<(), QueryError> {
-        let mut node_health = self.node_health.write().map_err(|e| QueryError::CacheError(e))?;
+        let mut node_health = self
+            .node_health
+            .write()
+            .map_err(|e| QueryError::CacheError(e.to_string()))?;
         node_health.insert(node, health);
         Ok(())
     }
@@ -267,7 +279,10 @@ impl QueryRouter {
 
     /// Clear the cache
     pub fn clear_cache(&self) -> Result<(), QueryError> {
-        let mut cache = self.cache.write().map_err(|e| QueryError::CacheError(e))?;
+        let mut cache = self
+            .cache
+            .write()
+            .map_err(|e| QueryError::CacheError(e.to_string()))?;
         cache.clear();
         Ok(())
     }
