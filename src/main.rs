@@ -1,6 +1,6 @@
 //! Amazon Rose Forest AI CLI
 
-use amazon_rose_forest::integration::yumechain::client::YumeiChainClient;
+//use amazon_rose_forest::integration::yumechain::client::YumeiChainClient;
 use std::env;
 
 #[tokio::main]
