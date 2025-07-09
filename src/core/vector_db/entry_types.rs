@@ -9,6 +9,7 @@ pub struct VectorEntry {
     pub timestamp: Timestamp,
 }
 
+// Centroid structure used to represent clusters in the DHT for hierarchical sharding
 #[hdk_entry(id = "centroid")]
 #[derive(Clone)]
 pub struct CentroidEntry {
