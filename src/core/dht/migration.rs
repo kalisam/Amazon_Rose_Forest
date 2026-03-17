@@ -1,7 +1,8 @@
 //! DHT migration management
 use super::*;
-use crate::error::SystemError;
-
+use crate::core::error::SystemError;
+use std::sync::Arc;
+use crate::core::vector_db::ShardMetrics;
 pub struct MigrationManager {
     config: MigrationConfig,
     metrics: Arc<ShardMetrics>,

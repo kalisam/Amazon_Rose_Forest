@@ -28,6 +28,18 @@ env_logger = "0.10"
 # Note: This is a placeholder, replace with your actual circuit breaker crate
 circuit_breaker = "0.1"
 
+# Vector database
+vector_db = "0.1"
+
+# Federated learning
+federated = "0.1"
+
+# DHT
+dht = "0.1"
+
+# Holochain
+hdk = "0.1"
+
 [dev-dependencies]
 # Mock HTTP server for testing
 mockito = "1.0"

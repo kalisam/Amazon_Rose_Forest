@@ -1,6 +1,7 @@
 //! Metrics collection for federated learning
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct LearningMetrics {

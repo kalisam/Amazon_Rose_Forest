@@ -1,7 +1,9 @@
 //! DHT routing and query handling
+use tokio::sync::RwLock;
+use std::sync::Arc;
 use super::*;
-use crate::error::SystemError;
-
+use crate::{error::SystemError, query::router::SearchResult};
+use crate::query::router::Query;
 pub struct QueryRouter {
     cache: Arc<RwLock<LruCache<QueryHash, Vec<SearchResult>>>>,
     routing_strategy: RoutingStrategy,

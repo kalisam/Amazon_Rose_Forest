@@ -8,6 +8,10 @@ mod migration;
 pub use sharding::ShardManager;
 pub use routing::QueryRouter;
 pub use migration::MigrationManager;
+pub use migration::MigrationConfig;
+pub use migration::MigrationPlan;
+pub use migration::StreamingMigration;
+pub use core::vector_db::ShardMetrics;
 
 // Core DHT configuration
 #[derive(Debug, Clone)]
